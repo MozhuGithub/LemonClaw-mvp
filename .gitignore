@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+release/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Electron
+*.blockmap
+*.exe
+*.dmg
+*.AppImage
+*.snap
+
+# TypeScript
+*.tsbuildinfo
+
+# Database (local only)
+*.db
+*.sqlite
+
+# Temp
+tmp/
+temp/
