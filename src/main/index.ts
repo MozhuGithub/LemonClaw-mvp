@@ -10,6 +10,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     title: 'LemonClaw',
+    icon: join(__dirname, '../../resources/icon/icon.jpg'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

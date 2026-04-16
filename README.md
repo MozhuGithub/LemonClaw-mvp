@@ -1,20 +1,20 @@
 # LemonClaw MVP
 
-> 基于多 Agent 的 AI 助手桌面应用
+> 基于 HomiClaw 架构增强的个人版 AI 助手桌面应用
 
 ## 简介
 
-LemonClaw 是一个基于 Electron + React 的桌面 AI 助手应用，支持多个 Agent 并行工作，每个 Agent 拥有独立的角色、配置和对话历史。
+LemonClaw 是一个基于 Electron + React 的桌面 AI 助手应用，继承 HomiClaw 的多 Agent 架构，参考 Hermes 的记忆系统，让 AI 越用越懂你。
 
-核心功能：
-- 多 Agent 系统 — 同时运行多个 AI 助手，各司其职
-- 智能规则引擎 — 基于时间/关键词定义 AI 行为规则
-- 长期记忆系统 — 跨会话记忆，让 AI 越用越懂你
-- 中文友好 — 完整的中文界面和文档
+核心特性：
+- **多 Agent 系统** — 多个 AI 助手各司其职，独立会话、独立记忆
+- **长期记忆系统** — 四层分层架构 + 信任评分 + 上下文压缩（参考 Hermes）
+- **主动学习引擎** — 经验收集 + 定期反思 + 可视化学习报告（LemonClaw 原创）
+- **技能系统** — 内置技能 + MCP 协议扩展 + 安全扫描
 
 ## 技术栈
 
-Electron 28 | React 18 | Vite 5 | Zustand | TypeScript | SQLite
+Electron 32 | React 18 | electron-vite | Zustand | TypeScript | SQLite | Tailwind
 
 ## 快速开始
 
@@ -22,26 +22,22 @@ Electron 28 | React 18 | Vite 5 | Zustand | TypeScript | SQLite
 # 安装依赖
 pnpm install
 
-# 复制环境变量配置
-cp .env.example .env
-# 编辑 .env 填入你的 API Key
-
 # 开发模式
 pnpm dev
 
 # 构建
 pnpm build
 
-# 打包
-pnpm package
+# 预览构建产物
+pnpm start
 ```
 
 ## 文档
 
-- [项目架构](docs/architecture/)
-- [MVP 规划](docs/planning/)
+- [产品架构文档](docs/architecture/LemonClaw产品架构文档.md)
+- [技术方案文档](docs/architecture/LemonClaw技术方案文档.md)
+- [MVP 进度跟踪](docs/planning/LemonClawMVP进度跟踪.md)
 - [每日开发记录](docs/daily/)
-- [开发指南](docs/guides/)
 
 ## 开发环境要求
 

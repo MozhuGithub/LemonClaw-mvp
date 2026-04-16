@@ -18,6 +18,11 @@ export default defineConfig({
   renderer: {
     plugins: [react()],
     root: resolve('src/renderer'),
+    resolve: {
+      alias: {
+        '@': resolve('src/renderer/src'),
+      },
+    },
     build: {
       outDir: resolve('out/renderer'),
     },
