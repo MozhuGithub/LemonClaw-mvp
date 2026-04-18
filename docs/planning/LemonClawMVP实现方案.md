@@ -5,10 +5,14 @@
 > 渐进明细：每完成一个 Step 后补充详细实现记录
 >
 > 创建日期：2026-04-17
+> 最后更新：2026-04-19
+> 架构版本：v3.0.0（Vendor 子进程模式）
 
 ---
 
-## Phase 1: 基础框架（继承 HomiClaw）
+## Phase 1: Gateway 集成 + Electron 壳
+
+> 架构变更说明：原 Phase 1 的 IPC/LLM/Agent/SQLite 等步骤（旧 Step 3-8）不再需要自行实现，由 OpenClaw Gateway 子进程提供。新 Phase 1 聚焦于 Gateway 集成层和 Electron UI 对接。
 
 ### Step 1: Electron 安全骨架 ✅（2026-04-16）
 
@@ -21,7 +25,6 @@
 | Preload API | contextBridge 暴露 `window.lemonclaw`（ping/getInfo） |
 | 单实例锁 + 窗口管理 | `app.requestSingleInstanceLock()` + 窗口激活 |
 | React 18 + Tailwind 基础页 | React StrictMode + Tailwind 指令 + 暗色 demo 页 |
-| core/ 子目录结构 | agent/skills/learning/memory/llm/tools/config/storage + .gitkeep |
 | 项目文件对齐架构 | 删除 rules/、创建 skills/learning/、清理 README/package.json |
 
 **关键文件：**
@@ -64,189 +67,219 @@
 | `src/renderer/src/pages/AgentsPage.tsx` | Agent 管理占位 |
 | `src/renderer/src/pages/SettingsPage.tsx` | 设置占位 |
 
-**配置改动：**
-- `tsconfig.json` — 加 `"baseUrl": "."`, `"paths": { "@/*": [...] }`
-- `electron.vite.config.ts` — renderer 配置加 `resolve.alias`
-- `tailwind.config.mjs` → `tailwind.config.js` — 重写为 CJS + shadcn 色彩系统 + `darkMode: 'class'`
-- `src/renderer/src/assets/main.css` — 替换为暗色主题 CSS 变量（zinc 暗色 + 黄色 primary）
-- `src/renderer/src/App.tsx` — demo 替换为 `<AppLayout />`
-
 **踩坑记录：**
 - `shadcn-ui` CLI 已废弃，必须用 `npx shadcn@latest`
 - `tailwind.config.mjs`（ESM）不兼容 `tailwindcss-animate` 的 `require()`，必须改为 `.js`（CJS）
-- 应用图标：用户提供的原图是 JPG 格式，Electron 图标需要 PNG 格式（支持透明通道，macOS 打包必须 PNG 源文件）
-- `src/main/index.ts` 已添加 `icon` 配置，但当前仍指向 `.jpg` 文件，待用户提供 PNG 后更新
+- 应用图标已改为 PNG 格式
 
 ---
 
-### Step 3: IPC 通信层 ⬜
+### Step 2.5: 架构方案决策 + 文档重构 ✅（2026-04-18）
+
+**任务拆分：**
+
+| 任务 | 实现 |
+|------|------|
+| 参考项目源码 clone | hermes/openclaw/rivonclaw → `references/`（shallow clone） |
+| HomiClaw 源码分析 | 6 篇文档精读（架构/Gateway/LLM/Session/工具/总结） |
+| 架构方案对比 | Bundle vs Vendor 子进程 vs 渐进式，深入分析 OpenClaw 构建系统 |
+| 架构决策 | 选择 Vendor 子进程模式（低初始成本、进程隔离、升级简单） |
+| 产品架构文档 v3.0.0 | Vendor 模式重构、新增 Gateway 子进程层、代码复用策略表 |
+| 技术方案文档 v3.0.0 | Gateway 集成层接口定义、Plugin Extension 接口、数据存储方案 |
+| CLAUDE.md 重写 | 项目结构按新架构更新、核心模块优先级调整 |
+| 项目目录调整 | 删除 `src/core/`，新增 `src/main/gateway/`、`src/main/memory/`、`src/main/learning/`、`src/extensions/` |
+
+**关键决策：**
+
+| 决策 | 选择 | 原因 |
+|------|------|------|
+| 集成方式 | Vendor 子进程（参考 RivonClaw） | Bundle 模式成本极高（tsdown + 20 动态 import + jiti + 90+ 扩展 + native 模块） |
+| Agent/LLM/Session | 由 OpenClaw Gateway 提供 | 不重复造轮子，直接使用 OpenClaw 的成熟实现 |
+| 自研范围 | Gateway 集成层 + 记忆系统 + 学习引擎 | OpenClaw 没有的能力（长期记忆、学习）才自研 |
+
+---
+
+### Step 3: Gateway 集成层 ⬜
+
+> 参考 RivonClaw（批判性参考）+ OpenClaw 官方文档
 
 **任务拆分：**
 
 | 任务 | 关键文件 | 说明 |
 |------|---------|------|
-| host-api IPC 抽象层 | `src/renderer/src/lib/host-api.ts` | 封装 IPC 调用，前端不直接用 `window.lemonclaw`，通过 host-api 统一接口 |
-| ipc-handlers 集中路由 | `src/main/ipc-handlers.ts` | 主进程侧 IPC handler 集中管理，从 index.ts 拆出 |
-| preload API 扩展 | `src/preload/index.ts` | 添加更多 IPC channel（chat/agent/config 相关） |
-| 类型定义 | `src/preload/types.ts` 或 `src/renderer/src/lib/host-api.ts` | 前后端共享的 IPC 参数和返回值类型 |
+| vendor 路径解析 | `src/main/gateway/vendor.ts` | 解析 OpenClaw 二进制/入口路径 |
+| GatewayLauncher | `src/main/gateway/launcher.ts` | spawn/stop/restart Gateway 子进程 + 指数退避重启（1000ms→30000ms）+ 就绪检测 |
+| Config Bridge | `src/main/gateway/config-bridge.ts` | LemonClaw 设置 → openclaw.json + 变更策略（none/reload/restart） |
+| Secret Injector | `src/main/gateway/secret-injector.ts` | LLM API Key → auth-profiles.json，非 LLM Key → 环境变量 |
+| RPC Client | `src/main/gateway/rpc-client.ts` | WebSocket 双向通信（ws://127.0.0.1:{port}）+ Ed25519 认证 |
+| IPC 对接 | `src/main/ipc-handlers.ts` | Gateway 状态/控制相关 IPC handler |
+| host-api 抽象层 | `src/renderer/src/lib/host-api.ts` | 前端统一接口，封装 IPC → RPC → Gateway 调用链 |
+| preload API 扩展 | `src/preload/index.ts` | 添加 Gateway 相关 IPC channel |
 
-**设计要点：**
-- host-api 层是前端和 Electron IPC 之间的桥梁，前端组件只调用 host-api 函数，不直接接触 IPC
-- ipc-handlers 按 namespace 分组（app:*, chat:*, agent:*, config:*）
-- preload 只做透传，不包含业务逻辑
+**接口定义（详见技术方案文档 §2）：**
 
----
-
-### Step 4: LLM 调用层 ⬜
-
-**任务拆分：**
-
-| 任务 | 关键文件 | 说明 |
-|------|---------|------|
-| LLMService | `src/core/llm/LLMService.ts` | OpenAI SDK 封装，支持多 Provider |
-| Provider 配置 | `src/core/llm/types.ts` | LLMProvider 接口、ChatParams、Message 类型 |
-| 流式响应 | `src/core/llm/LLMService.ts` | SSE 流式 → IPC 流式转发到 Renderer（ipcMain.on → webContents.send） |
-| 错误分类 | `src/core/llm/ErrorClassifier.ts` | FailoverReason 枚举 + ClassifiedError 接口 |
-| 自动重试 | `src/core/llm/LLMService.ts` | 指数退避重试 + Provider 切换 + 上下文压缩重试 |
-
-**接口参考（技术方案文档 §6）：**
 ```typescript
-enum FailoverReason {
-  auth, auth_permanent, billing, rate_limit,
-  overloaded, timeout, context_overflow, model_not_found, unknown
+// GatewayLauncher
+interface GatewayLauncher {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  restart(): Promise<void>;
+  reload(): Promise<void>;           // SIGUSR1 优雅重载
+  getState(): GatewayState;          // stopped|starting|ready|running|error
+  on(event: string, handler: Function): void;
 }
-interface ClassifiedError { reason, retryable, shouldCompress, shouldRotateCredential, shouldFallback }
+
+// RPC Client
+interface GatewayRpcClient {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  request(method: string, params: any): Promise<any>;
+  subscribe(event: string, handler: Function): void;
+  chat.send(sessionKey: string, message: string): Promise<void>;
+  chat.history(sessionKey: string): Promise<Message[]>;
+  agents.list(): Promise<AgentInfo[]>;
+}
 ```
 
+**验证标准：**
+- [ ] Gateway 子进程可以正常启动/停止/重启
+- [ ] RPC Client 可以通过 WebSocket 与 Gateway 通信
+- [ ] Config Bridge 能正确生成 openclaw.json
+- [ ] Secret Injector 能将 API Key 注入 auth-profiles.json
+
 ---
 
-### Step 5: 单 Agent + 基础聊天 ⬜
+### Step 4: Electron UI 对接 ⬜
 
 **任务拆分：**
 
 | 任务 | 关键文件 | 说明 |
 |------|---------|------|
-| AgentConfig 定义 | `src/core/agent/types.ts` | AgentConfig 接口（id/name/model/systemPrompt/skills/permissions/memory/learning） |
-| AgentManager（单 Agent） | `src/core/agent/AgentManager.ts` | 创建/获取默认 Agent，管理会话上下文 |
-| 聊天界面 UI | `src/renderer/src/pages/ChatPage.tsx` | 消息列表 + 输入框 + 发送按钮 |
+| 聊天页面对接 | `src/renderer/src/pages/ChatPage.tsx` | 通过 host-api → RPC 调 Gateway chat API + 流式响应渲染 |
 | 消息气泡组件 | `src/renderer/src/components/chat/MessageBubble.tsx` | 用户/AI 消息样式 + Markdown 渲染 |
-| 流式渲染 | `src/renderer/src/pages/ChatPage.tsx` | AI 回复逐字显示 |
-| Zustand chat store | `src/renderer/src/stores/chat-store.ts` | 消息列表、发送状态、流式内容 |
+| 流式渲染 | `src/renderer/src/stores/chat-store.ts` | AI 回复逐字显示，RPC SSE → IPC 流式转发 |
+| 设置页面对接 | `src/renderer/src/pages/SettingsPage.tsx` | API Key 输入 + 保存 → Secret Injector → auth-profiles.json |
+| Agent 切换 | `src/renderer/src/pages/AgentsPage.tsx` | 通过 RPC 管理 Agent（list/switch） |
+| Zustand stores | `src/renderer/src/stores/` | chat-store、agent-store、gateway-store |
+| IPC 路由完善 | `src/main/ipc-handlers.ts` | chat/agent/gateway/config namespace 分组 |
 
-**接口参考（技术方案文档 §2）：** AgentConfig、Agent、AgentEvents
+**验证标准：**
+- [ ] 用户可以与 Agent 进行多轮对话（通过 Gateway RPC）
+- [ ] 流式响应正常显示
+- [ ] API Key 配置后可以正常调用 LLM
+- [ ] 可以在 2 个 Agent 之间切换
 
 ---
 
-### Step 6: API Key 配置 ⬜
+### Step 5: Plugin Extension 基础框架 ⬜
 
 **任务拆分：**
 
 | 任务 | 关键文件 | 说明 |
 |------|---------|------|
-| safeStorage 封装 | `src/core/config/KeychainStore.ts` | 加密存储/读取 API Key（macOS Keychain / Windows DPAPI） |
-| 设置页面 UI | `src/renderer/src/pages/SettingsPage.tsx` | API Key 输入 + 保存 + 连接测试 |
-| 多 Provider 配置 | `src/core/config/ProviderManager.ts` | Theta / OpenAI / 其他 Provider 的 baseUrl + apiKey 管理 |
-| .env 文件支持 | `src/main/index.ts` 或 `bootstrap.ts` | 开发环境从 .env 读取备用 |
+| Extension 注册框架 | `src/extensions/` | openclaw.plugin.json 清单格式 + defineLemonClawPlugin |
+| lemonclaw-memory Extension | `src/extensions/lemonclaw-memory/` | before_agent_start hook，注入基础系统提示 |
+| Extension 加载 | `src/main/gateway/launcher.ts` | Config Bridge 配置 Extension 路径 |
+| hook 调试 | — | 验证 Plugin Extension 被 Gateway 正确加载和触发 |
 
----
-
-### Step 7: SQLite 存储 ⬜
-
-**任务拆分：**
-
-| 任务 | 关键文件 | 说明 |
-|------|---------|------|
-| database.ts 初始化 | `src/core/storage/database.ts` | better-sqlite3 + WAL 模式 + 迁移系统 |
-| ChatRepo | `src/core/storage/repositories/ChatRepo.ts` | Session + Message CRUD |
-| AgentRepo | `src/core/storage/repositories/AgentRepo.ts` | AgentConfig 存取 |
-| SettingsRepo | `src/core/storage/repositories/SettingsRepo.ts` | 键值对设置存取 |
-| IPC 通道对接 | ipc-handlers | 存储操作通过 IPC 暴露给 renderer |
-
----
-
-### Step 8: 打磨 ⬜
-
-| 任务 | 说明 |
-|------|------|
-| 热加载优化 | electron-vite HMR 稳定性检查 |
-| 错误边界 | React ErrorBoundary 组件 |
-| 整体联调 | Step 3-7 集成测试 |
+**验证标准：**
+- [ ] Extension 被 Gateway 正确加载
+- [ ] before_agent_start hook 被触发
+- [ ] 系统提示成功注入
 
 ---
 
 ## Phase 2: 记忆系统（参考 Hermes）
 
-### 记忆引擎
+> 详见技术方案文档 §3
+
+### Step 6: 记忆引擎 ⬜
+
+**任务拆分：**
 
 | 任务 | 关键文件 | 说明 |
 |------|---------|------|
-| MemoryManager | `src/core/memory/MemoryManager.ts` | 记忆系统入口，协调各组件 |
-| MemoryStore | `src/core/memory/MemoryStore.ts` | MEMORY.md / USER.md 读写（§ 追踪，容量扩展） |
-| TrustScorer | `src/core/memory/TrustScorer.ts` | 不对称惩罚 +0.05/-0.10 + 时间衰减（半衰期 90 天） |
-| StructuredMemory | SQLite 存储 | fact/preference/event/entity 四种类型 |
-| 检索管线 | `src/core/memory/MemoryManager.ts` | FTS5 → 信任加权 → 衰减 → Top-K |
-| 冻结快照 | `src/core/memory/MemoryManager.ts` | 会话开始时冻结，保护 LLM 前缀缓存 |
-| 安全扫描 | `src/core/memory/MemoryScanner.ts` | 防注入/外泄/不可见字符 |
-| Nudge 机制 | `src/core/memory/NudgeEngine.ts` | 每 N 轮主动审查记忆质量 |
-| Agent 隔离 | 目录结构 | 每个 Agent 独立 `~/.lemonclaw/agents/{agentId}/MEMORY.md` |
+| SQLite 初始化 | `src/main/storage/database.ts` | better-sqlite3 + WAL 模式 + 迁移系统 |
+| MemoryStore | `src/main/memory/MemoryStore.ts` | MEMORY.md / USER.md 读写 + 冻结快照 |
+| TrustScorer | `src/main/memory/TrustScorer.ts` | 不对称惩罚 +0.05/-0.10 + 时间衰减（半衰期 90 天） |
+| 结构化记忆 | SQLite + FTS5 | fact/preference/event/entity 四种类型 |
+| 记忆检索管线 | `src/main/memory/MemoryManager.ts` | FTS5 → 信任加权 → 衰减 → Top-K |
+| MemoryScanner | `src/main/memory/MemoryScanner.ts` | 防注入/外泄/不可见字符 |
+| lemonclaw-memory 完善 | `src/extensions/lemonclaw-memory/` | before_agent_start 注入记忆上下文（替代 Step 5 的基础版本） |
+| Agent 隔离记忆 | `~/.lemonclaw/agents/{agentId}/` | 每个 Agent 独立 MEMORY.md |
 
-### 上下文压缩
+**验证标准：**
+- [ ] MEMORY.md / USER.md 正常读写
+- [ ] 信任评分生效
+- [ ] FTS5 关键词检索可用
+- [ ] 安全扫描拦截注入内容
+- [ ] Plugin Extension 成功注入记忆到 Agent 系统提示
+
+---
+
+### Step 7: 记忆 UI + 上下文压缩 ⬜
+
+**任务拆分：**
 
 | 任务 | 关键文件 | 说明 |
 |------|---------|------|
-| ContextCompressor | `src/core/memory/ContextCompressor.ts` | 4 阶段压缩（修剪→保护头部→保护尾部→LLM 总结） |
+| 记忆管理界面 | `src/renderer/src/pages/MemoryPage.tsx` | 列表/搜索/编辑/删除，显示信任评分 |
+| 容量状态面板 | 同上 | MEMORY.md / USER.md 使用率进度条 |
+| ContextCompressor | `src/main/memory/ContextCompressor.ts` | 4 阶段压缩（修剪→保护头部→保护尾部→LLM 总结） |
 | 防压缩风暴 | 同上 | 连续两次节省 <10% 时跳过 |
+| NudgeEngine | `src/main/memory/NudgeEngine.ts` | 每 N 轮主动审查记忆质量 |
 
-### 记忆 UI
+**验证标准：**
+- [ ] 记忆管理界面可用
+- [ ] 上下文压缩生效
+- [ ] Nudge 审查建议正确展示
+
+---
+
+## Phase 3: 学习引擎（LemonClaw 原创）
+
+> 详见技术方案文档 §4
+
+### Step 8: 经验收集 ⬜
+
+**任务拆分：**
+
+| 任务 | 关键文件 | 说明 |
+|------|---------|------|
+| ExperienceCollector | `src/main/learning/ExperienceCollector.ts` | 自动收集用户修改/评分/纠正 |
+| lemonclaw-learning Extension | `src/extensions/lemonclaw-learning/` | after_tool_call hook 收集经验数据 |
+| SkillPatcher | `src/main/learning/SkillPatcher.ts` | 技能即时修补（参考 Hermes） |
+| 技能版本管理 | `src/main/learning/SkillVersionManager.ts` | 技能更新支持回滚 |
+
+**验证标准：**
+- [ ] 经验自动收集
+- [ ] 技能即时修补生效
+
+---
+
+### Step 9: 反思引擎 + UI ⬜
+
+**任务拆分：**
+
+| 任务 | 关键文件 | 说明 |
+|------|---------|------|
+| ReflectionEngine | `src/main/learning/ReflectionEngine.ts` | 定期 LLM 分析经验，生成 ReflectionReport |
+| 学习报告 UI | `src/renderer/src/pages/LearningPage.tsx` | 统计/成功模式/偏好/建议的可视化 |
+
+**验证标准：**
+- [ ] 反思引擎定期生成报告
+- [ ] 学习报告可视化界面可用
+- [ ] 建议需用户确认后才执行
+
+---
+
+## Phase 4: 优化 + 发布
+
+### Step 10: 优化 + 打包 ⬜
 
 | 任务 | 说明 |
 |------|------|
-| 记忆管理界面 | 列表/搜索/编辑/删除，显示信任评分 |
-| 容量状态面板 | MEMORY.md / USER.md 使用率进度条 |
-
----
-
-## Phase 3: 技能系统（继承 HomiClaw + Hermes）
-
-### Skill Registry
-
-| 任务 | 关键文件 | 说明 |
-|------|---------|------|
-| SkillRegistry | `src/core/skills/SkillRegistry.ts` | 注册/注销/启用/禁用技能 |
-| 内置技能 | `src/core/skills/builtin/` | read/write/edit/exec/web_search |
-| SkillScanner | `src/core/skills/SkillScanner.ts` | SAFE/CAUTION/DANGEROUS 三级 |
-| 渐进式加载 | SkillRegistry | 列表→详情→文件内容（节省 token） |
-| 条件激活 | SKILL.md frontmatter | `requires_toolsets` / `fallback_for_toolsets` |
-| SKILL.md 格式 | Markdown 文件 | YAML frontmatter + Markdown 正文 |
-
-### MCP 集成
-
-| 任务 | 关键文件 | 说明 |
-|------|---------|------|
-| MCP Client | `src/core/skills/MCPClient.ts` | MCP 协议客户端 |
-| Server 管理 | 同上 | 连接/断开/重连 MCP Server |
-| 工具调用 | 同上 | 通过 MCP 协议调用外部工具 |
-
----
-
-## Phase 4: 学习引擎（LemonClaw 原创）
-
-| 任务 | 关键文件 | 说明 |
-|------|---------|------|
-| ExperienceCollector | `src/core/learning/ExperienceCollector.ts` | 自动收集用户修改/评分/纠正 |
-| ReflectionEngine | `src/core/learning/ReflectionEngine.ts` | 定期 LLM 分析经验，生成 ReflectionReport |
-| SkillPatcher | `src/core/learning/SkillPatcher.ts` | 技能即时修补（参考 Hermes） |
-| 技能版本管理 | `src/core/learning/SkillVersionManager.ts` | 技能更新支持回滚 |
-| 学习报告 UI | `src/renderer/src/pages/` | 统计/成功模式/偏好/建议的可视化 |
-
----
-
-## Phase 5: 优化 + 发布
-
-| 任务 | 关键文件 | 说明 |
-|------|---------|------|
-| ErrorClassifier 完善 | `src/core/llm/ErrorClassifier.ts` | FailoverReason 全量实现 |
-| 数据库优化 | `src/core/storage/` | 索引 + 查询优化 |
-| 主题系统 | CSS 变量 + Zustand | 亮色/暗色切换 |
-| 打包 | electron-builder | Windows exe + macOS dmg |
-| 用户文档 | `docs/` | 使用指南 |
+| 错误恢复 | Gateway 异常恢复 + 数据库优化 |
+| UI 优化 | 主题系统（亮色/暗色切换）+ 错误边界 |
+| 打包 | electron-builder → Windows exe + macOS dmg |
+| 用户文档 | 使用指南 |

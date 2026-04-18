@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
+import { initIpcHandlers } from './ipc-handlers'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -10,7 +11,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     title: 'LemonClaw',
-    icon: join(__dirname, '../../resources/icon/icon.jpg'),
+    icon: join(__dirname, '../../resources/icon/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -26,7 +27,10 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  initIpcHandlers()
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -40,7 +44,7 @@ app.on('activate', () => {
   }
 })
 
-// === IPC Handlers ===
+// === App IPC ===
 
 ipcMain.handle('app:ping', () => {
   return 'pong from LemonClaw main process'
