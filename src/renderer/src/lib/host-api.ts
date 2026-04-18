@@ -18,9 +18,11 @@ export const hostApi = {
   onGatewayState: (cb: (state: string) => void): (() => void) => api.onGatewayState(cb),
 
   // Chat
-  chatSend: (sessionKey: string, message: string): Promise<void> =>
+  chatSend: (sessionKey: string, message: string): Promise<{ runId: string }> =>
     api.chatSend(sessionKey, message),
   chatHistory: (sessionKey: string): Promise<any[]> => api.chatHistory(sessionKey),
+  chatAbort: (sessionKey: string, runId?: string): Promise<{ ok: boolean; aborted: boolean }> =>
+    api.chatAbort(sessionKey, runId),
   onChatEvent: (cb: (event: string, payload: any) => void): (() => void) => api.onChatEvent(cb),
 
   // Agents

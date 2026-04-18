@@ -57,18 +57,19 @@ export function injectToAuthProfiles(keys: ProviderKey[]): void {
   const store = readExisting()
 
   for (const key of keys) {
-    const profileId = `${key.provider}:${key.id}`
+    const gatewayProvider = key.provider === 'minimax' ? 'minimax-portal' : key.provider
+    const profileId = `${gatewayProvider}:${key.id}`
     store.profiles[profileId] = {
       type: 'api_key',
-      provider: key.provider,
+      provider: gatewayProvider,
       key: key.apiKey,
     }
     // 更新 order
-    if (!store.order[key.provider]) {
-      store.order[key.provider] = []
+    if (!store.order[gatewayProvider]) {
+      store.order[gatewayProvider] = []
     }
-    if (!store.order[key.provider].includes(profileId)) {
-      store.order[key.provider].push(profileId)
+    if (!store.order[gatewayProvider].includes(profileId)) {
+      store.order[gatewayProvider].push(profileId)
     }
   }
 

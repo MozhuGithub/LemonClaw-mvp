@@ -12,14 +12,16 @@ export function initIpcHandlers(): void {
   // === Gateway ===
 
   ipcMain.handle('gateway:start', async () => {
-    // 确保 Gateway 启动前配置文件已写入
-    const config = buildGatewayConfig(3212)
+    const apiKey = providerKeys.find(k => k.provider === 'minimax')?.apiKey || ''
+    const config = buildGatewayConfig(3212, { apiKey })
     writeGatewayConfig(config)
 
     if (!launcher) {
       launcher = new GatewayLauncher(3212, providerKeys)
       launcher.on('stateChange', (state: GatewayState) => {
         console.log('[gateway:state]', state)
+        // 不转发 'running'——等 RPC 连接成功后再通知前端
+        if (state === 'running') return
         BrowserWindow.getAllWindows().forEach(w => w.webContents.send('gateway:stateChange', state))
       })
       launcher.on('stdout', (line: string) => {
@@ -73,12 +75,17 @@ export function initIpcHandlers(): void {
 
   ipcMain.handle('chat:send', async (_event, sessionKey: string, message: string) => {
     if (!rpcClient?.isConnected()) throw new Error('Gateway not connected')
-    await rpcClient.chatSend(sessionKey, message)
+    return rpcClient.chatSend(sessionKey, message)
   })
 
   ipcMain.handle('chat:history', async (_event, sessionKey: string) => {
     if (!rpcClient?.isConnected()) throw new Error('Gateway not connected')
     return rpcClient.chatHistory(sessionKey)
+  })
+
+  ipcMain.handle('chat:abort', async (_event, sessionKey: string, runId?: string) => {
+    if (!rpcClient?.isConnected()) throw new Error('Gateway not connected')
+    return rpcClient.chatAbort(sessionKey, runId)
   })
 
   // === Agents ===

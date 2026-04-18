@@ -99,88 +99,187 @@
 
 ---
 
-### Step 3: Gateway 集成层 ⬜
-
-> 参考 RivonClaw（批判性参考）+ OpenClaw 官方文档
+### Step 3: Gateway 集成层 ✅（2026-04-18）
 
 **任务拆分：**
 
-| 任务 | 关键文件 | 说明 |
-|------|---------|------|
-| vendor 路径解析 | `src/main/gateway/vendor.ts` | 解析 OpenClaw 二进制/入口路径 |
-| GatewayLauncher | `src/main/gateway/launcher.ts` | spawn/stop/restart Gateway 子进程 + 指数退避重启（1000ms→30000ms）+ 就绪检测 |
-| Config Bridge | `src/main/gateway/config-bridge.ts` | LemonClaw 设置 → openclaw.json + 变更策略（none/reload/restart） |
-| Secret Injector | `src/main/gateway/secret-injector.ts` | LLM API Key → auth-profiles.json，非 LLM Key → 环境变量 |
-| RPC Client | `src/main/gateway/rpc-client.ts` | WebSocket 双向通信（ws://127.0.0.1:{port}）+ Ed25519 认证 |
-| IPC 对接 | `src/main/ipc-handlers.ts` | Gateway 状态/控制相关 IPC handler |
-| host-api 抽象层 | `src/renderer/src/lib/host-api.ts` | 前端统一接口，封装 IPC → RPC → Gateway 调用链 |
-| preload API 扩展 | `src/preload/index.ts` | 添加 Gateway 相关 IPC channel |
+| 任务 | 关键文件 | 实现方式 |
+|------|---------|---------|
+| vendor 路径解析 | `src/main/gateway/vendor.ts` | 优先 vendor 子模块 `openclaw.mjs`（需 `dist/entry.js` 存在），回退全局 npm；Node 二进制用系统 `node`（非 Electron 内置 v20.x） |
+| GatewayLauncher | `src/main/gateway/launcher.ts` | spawn 子进程 + 指数退避重启（1000ms→30000ms）+ 就绪检测（stdout "listening on"）+ Windows taskkill 进程树 |
+| Config Bridge | `src/main/gateway/config-bridge.ts` | LemonClaw 设置 → `openclaw.json` + 变更策略（none/reload_config/restart_process）；目录不存在时跳过（extensions/skills） |
+| Secret Injector | `src/main/gateway/secret-injector.ts` | LLM API Key → `auth-profiles.json`（`{version, profiles, order}` 格式）+ 环境变量双路径注入 |
+| RPC Client | `src/main/gateway/rpc-client.ts` | WebSocket 双向通信 + token 认证（不含 nonce）+ 指数退避重连 + JSON-RPC 帧协议 |
+| IPC 对接 | `src/main/ipc-handlers.ts` | gateway:start/stop/restart/state + chat:send/history + agents:list + config:setModel/setApiKey |
+| host-api 抽象层 | `src/renderer/src/lib/host-api.ts` | 前端统一接口，封装 IPC 调用链 |
+| preload API 扩展 | `src/preload/index.ts` | 暴露 Gateway/Chat/Agents/Config 相关 IPC channel |
 
-**接口定义（详见技术方案文档 §2）：**
+**实际接口（已验证可用）：**
 
 ```typescript
 // GatewayLauncher
-interface GatewayLauncher {
-  start(): Promise<void>;
-  stop(): Promise<void>;
-  restart(): Promise<void>;
-  reload(): Promise<void>;           // SIGUSR1 优雅重载
-  getState(): GatewayState;          // stopped|starting|ready|running|error
-  on(event: string, handler: Function): void;
+class GatewayLauncher extends EventEmitter {
+  start(): Promise<void>           // spawn 子进程，设置环境变量
+  stop(): Promise<void>            // taskkill(SIGTERM) + 清理 auth profiles
+  restart(): Promise<void>         // stop → start
+  reload(): Promise<void>          // Unix: SIGUSR1 / Windows: restart
+  getState(): GatewayState         // 'stopped'|'starting'|'running'|'error'
+  getPort(): number
+  setProviderKeys(keys): void
 }
 
-// RPC Client
-interface GatewayRpcClient {
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
-  request(method: string, params: any): Promise<any>;
-  subscribe(event: string, handler: Function): void;
-  chat.send(sessionKey: string, message: string): Promise<void>;
-  chat.history(sessionKey: string): Promise<Message[]>;
-  agents.list(): Promise<AgentInfo[]>;
+// RPC Client（WebSocket ws://127.0.0.1:{port}）
+class GatewayRpcClient extends EventEmitter {
+  connect(): Promise<void>         // 等待 connect.challenge → 回复 connect（token 认证）
+  disconnect(): Promise<void>
+  request(method, params): Promise<any>  // JSON-RPC 帧：{type:'req', id, method, params}
+  chatSend(sessionKey, message): Promise<void>
+  chatHistory(sessionKey): Promise<any[]>
+  agentsList(): Promise<any[]>
 }
 ```
 
-**验证标准：**
-- [ ] Gateway 子进程可以正常启动/停止/重启
-- [ ] RPC Client 可以通过 WebSocket 与 Gateway 通信
-- [ ] Config Bridge 能正确生成 openclaw.json
-- [ ] Secret Injector 能将 API Key 注入 auth-profiles.json
+**关键踩坑（实际调试修正）：**
+
+| 问题 | 原因 | 修复 |
+|------|------|------|
+| Gateway 立即退出 | Electron 内置 Node v20.x，OpenClaw 要求 v22.12+ | `getNodeBin()` 返回 `'node'`（系统 Node v24.x） |
+| 握手 "unexpected property 'nonce'" | nonce 仅用于 Ed25519 设备认证，token 认证不需要 | `auth` 只含 `{ token }` |
+| 握手 "client/id must be constant" | `client.id: 'lemonclaw'` 不被 OpenClaw schema 接受 | 改为 `'node-host'` |
+| "Missing config" 启动失败 | Vendor 模式无全局配置文件 | 添加 `OPENCLAW_CONFIG_PATH` 环境变量 |
+| "plugin path not found" | extensions 目录不存在 | `existsSync` 检查后才写入 config |
+
+**验证结果：**
+- [x] Gateway 子进程可以正常启动/停止/重启（`gateway:start` → `starting` → `running`）
+- [x] RPC Client 可以通过 WebSocket 与 Gateway 通信（握手成功）
+- [x] Config Bridge 能正确生成 openclaw.json
+- [x] Secret Injector 能将 API Key 注入 auth-profiles.json
 
 ---
 
-### Step 4: Electron UI 对接 ⬜
+### Step 4: 基础聊天壳子（Mock 模式） ✅（2026-04-19）
 
 **任务拆分：**
 
 | 任务 | 关键文件 | 说明 |
 |------|---------|------|
-| 聊天页面对接 | `src/renderer/src/pages/ChatPage.tsx` | 通过 host-api → RPC 调 Gateway chat API + 流式响应渲染 |
-| 消息气泡组件 | `src/renderer/src/components/chat/MessageBubble.tsx` | 用户/AI 消息样式 + Markdown 渲染 |
-| 流式渲染 | `src/renderer/src/stores/chat-store.ts` | AI 回复逐字显示，RPC SSE → IPC 流式转发 |
-| 设置页面对接 | `src/renderer/src/pages/SettingsPage.tsx` | API Key 输入 + 保存 → Secret Injector → auth-profiles.json |
-| Agent 切换 | `src/renderer/src/pages/AgentsPage.tsx` | 通过 RPC 管理 Agent（list/switch） |
-| Zustand stores | `src/renderer/src/stores/` | chat-store、agent-store、gateway-store |
-| IPC 路由完善 | `src/main/ipc-handlers.ts` | chat/agent/gateway/config namespace 分组 |
+| Gateway Store | `src/renderer/src/stores/gateway-store.ts` | Zustand 管理 Gateway 启停状态（stopped/starting/running/error） |
+| Chat Store（Mock） | `src/renderer/src/stores/chat-store.ts` | Mock 流式回复，不调真实 API，验证 UI 流程 |
+| 消息气泡组件 | `src/renderer/src/components/chat/MessageBubble.tsx` | 用户右对齐/AI 左对齐，流式中显示光标 |
+| 输入框组件 | `src/renderer/src/components/chat/ChatInput.tsx` | Input + 发送/停止按钮，Enter 发送 |
+| 消息列表 | `src/renderer/src/components/chat/MessageList.tsx` | ScrollArea + 自动滚到底部 |
+| ChatPage 改写 | `src/renderer/src/pages/ChatPage.tsx` | 三态 UI（stopped→启动按钮、starting→加载、running→聊天） |
+| SettingsPage 框架 | `src/renderer/src/pages/SettingsPage.tsx` | API Key 表单框架，未接通 |
+| AgentsPage 框架 | `src/renderer/src/pages/AgentsPage.tsx` | Agent 列表框架，未接通 |
+| chat:abort 通道 | rpc-client + ipc-handlers + preload + host-api | 4 个文件各加 1 行 |
 
 **验证标准：**
-- [ ] 用户可以与 Agent 进行多轮对话（通过 Gateway RPC）
-- [ ] 流式响应正常显示
-- [ ] API Key 配置后可以正常调用 LLM
-- [ ] 可以在 2 个 Agent 之间切换
+- [x] 启动 Gateway → 状态从 stopped 到 running
+- [x] 发消息 → 看到 Mock 流式回复
+- [x] 停止按钮可中断回复
+
+**关键踩坑：**
+- Gateway plugins 配置不能引用不存在的插件（如 `minimax`），否则校验失败反复重启
+- RPC 握手需要 `controlUi: { dangerouslyDisableDeviceAuth: true }` 绕过设备认证
+- `openclaw-control-ui` client.id 需要 `origin` header 才能 WebSocket 连接
 
 ---
 
-### Step 5: Plugin Extension 基础框架 ⬜
+### Step 5: LLM 接通 ⬜
+
+**目标**：Gateway 通过 minimax-portal provider 调用 Minimax API，前端收到真实流式回复
 
 **任务拆分：**
 
 | 任务 | 关键文件 | 说明 |
 |------|---------|------|
-| Extension 注册框架 | `src/extensions/` | openclaw.plugin.json 清单格式 + defineLemonClawPlugin |
-| lemonclaw-memory Extension | `src/extensions/lemonclaw-memory/` | before_agent_start hook，注入基础系统提示 |
-| Extension 加载 | `src/main/gateway/launcher.ts` | Config Bridge 配置 Extension 路径 |
-| hook 调试 | — | 验证 Plugin Extension 被 Gateway 正确加载和触发 |
+| Config Bridge 完善 | `src/main/gateway/config-bridge.ts` | `auth.profiles` + `models.providers`（嵌入 apiKey）+ `plugins.entries`（minimax-portal-auth），对照用户可用配置 |
+| Chat Store 切真实模式 | `src/renderer/src/stores/chat-store.ts` | 去掉 mock，用 hostApi.chatSend → 监听 onChatEvent（delta/final/error/aborted） |
+| RPC 事件转发 | `src/main/ipc-handlers.ts` | rpcClient.on('event') → BrowserWindow.send('chat:event') |
+| API Key 硬编码测试 | `src/main/ipc-handlers.ts` | 临时硬编码 Minimax API Key 验证通路，验证后改为 Settings 注入 |
+
+**验证标准：**
+- [ ] 发消息 → 收到 Minimax 模型真实回复
+- [ ] 流式显示（delta → final）
+- [ ] 错误状态正确展示（模型不可用等）
+
+**前置条件**：Minimax API Key、模型 `minimax-portal/MiniMax-M2.7-HighSpeed`
+
+---
+
+### Step 6: Settings 页对接 ⬜
+
+**目标**：用户通过 UI 配置 API Key 和模型，无需手动改文件
+
+**任务拆分：**
+
+| 任务 | 关键文件 | 说明 |
+|------|---------|------|
+| Settings 页表单 | `src/renderer/src/pages/SettingsPage.tsx` | Provider 选择 + API Key 输入 + 模型选择 |
+| Secret Injector 联动 | `src/main/gateway/secret-injector.ts` | minimax → minimax-portal 映射，写入 auth-profiles.json |
+| Config Bridge 联动 | `src/main/gateway/config-bridge.ts` | apiKey 传入 buildGatewayConfig → models.providers.apiKey |
+| 配置变更策略 | `src/main/ipc-handlers.ts` | keyOnly（重写 auth-profiles）、configOnly（SIGUSR1）、restart（重写+重启） |
+| 去掉 API Key 硬编码 | `src/main/ipc-handlers.ts` | 清除 Step 5 的临时硬编码 |
+
+**验证标准：**
+- [ ] Settings 页输入 API Key → 保存 → Gateway 能用新 Key 调模型
+- [ ] 切换模型 → Chat 使用新模型回复
+- [ ] Key 不填时提示配置
+
+---
+
+### Step 7: 会话持久化 ⬜
+
+**目标**：对话历史保存、多轮上下文、重启后恢复
+
+**任务拆分：**
+
+| 任务 | 关键文件 | 说明 |
+|------|---------|------|
+| 加载历史 | `src/renderer/src/stores/chat-store.ts` | loadHistory → hostApi.chatHistory → 渲染消息列表 |
+| 多轮上下文 | — | Gateway 自带 Session 管理（JSONL），chat.send 自动携带上下文 |
+| 重启恢复 | `src/renderer/src/pages/ChatPage.tsx` | 应用启动时 Gateway 连接后自动 loadHistory |
+| 残留清理 | `src/main/ipc-handlers.ts` | 清理旧会话的错误消息（Unknown model 等） |
+
+**验证标准：**
+- [ ] 关闭应用 → 重启 → 看到之前的对话
+- [ ] 连续对话 3 轮以上，AI 记住前文
+- [ ] 旧错误消息不再出现
+
+---
+
+### Step 8: Agent 管理 ⬜
+
+**目标**：用户可以看到 Agent 列表并切换
+
+**任务拆分：**
+
+| 任务 | 关键文件 | 说明 |
+|------|---------|------|
+| Agent Store | `src/renderer/src/stores/agent-store.ts` | agentsList RPC → Agent[] |
+| AgentsPage 对接 | `src/renderer/src/pages/AgentsPage.tsx` | 卡片列表 + 选中高亮 + 点击切换 |
+| 切换逻辑 | `src/main/gateway/rpc-client.ts` | sessions.patch 切换 Agent |
+| 默认 Agent | `src/main/gateway/config-bridge.ts` | agents.list 配置默认 Agent |
+
+**验证标准：**
+- [ ] AgentsPage 显示 Agent 列表
+- [ ] 点击切换 → 回到 Chat 发消息用新 Agent
+- [ ] 当前 Agent 高亮显示
+
+---
+
+### Step 9: Extension 基础框架 ⬜
+
+**目标**：lemonclaw-memory Extension 被 Gateway 加载，注入系统提示
+
+**任务拆分：**
+
+| 任务 | 关键文件 | 说明 |
+|------|---------|------|
+| Extension 注册 | `src/extensions/lemonclaw-memory/` | openclaw.plugin.json + defineLemonClawPlugin |
+| before_agent_start hook | 同上 | 注入基础系统提示（你是 LemonClaw 助手...） |
+| Config Bridge 配路径 | `src/main/gateway/config-bridge.ts` | plugins.load.paths 指向 extensions 目录 |
+| Gateway 加载验证 | — | 检查 Gateway 日志确认 Extension 被识别 |
 
 **验证标准：**
 - [ ] Extension 被 Gateway 正确加载
@@ -192,8 +291,10 @@ interface GatewayRpcClient {
 ## Phase 2: 记忆系统（参考 Hermes）
 
 > 详见技术方案文档 §3
+>
+> MVP 阶段先用 OpenClaw 内置 MEMORY.md 文件记忆，Phase 2 再实现完整记忆系统
 
-### Step 6: 记忆引擎 ⬜
+### Step 10: 记忆引擎 ⬜
 
 **任务拆分：**
 
@@ -217,7 +318,7 @@ interface GatewayRpcClient {
 
 ---
 
-### Step 7: 记忆 UI + 上下文压缩 ⬜
+### Step 11: 记忆 UI + 上下文压缩 ⬜
 
 **任务拆分：**
 
@@ -240,7 +341,7 @@ interface GatewayRpcClient {
 
 > 详见技术方案文档 §4
 
-### Step 8: 经验收集 ⬜
+### Step 12: 经验收集 ⬜
 
 **任务拆分：**
 
@@ -257,7 +358,7 @@ interface GatewayRpcClient {
 
 ---
 
-### Step 9: 反思引擎 + UI ⬜
+### Step 13: 反思引擎 + UI ⬜
 
 **任务拆分：**
 
@@ -275,7 +376,7 @@ interface GatewayRpcClient {
 
 ## Phase 4: 优化 + 发布
 
-### Step 10: 优化 + 打包 ⬜
+### Step 14: 优化 + 打包 ⬜
 
 | 任务 | 说明 |
 |------|------|

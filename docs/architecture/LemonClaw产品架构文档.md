@@ -2,9 +2,9 @@
 
 > 基于 HomiClaw 架构增强的个人版 AI 助手
 >
-> 版本：v3.0.0
-> 日期：2026-04-18
-> 状态：设计稿（Vendor 模式重构）
+> 版本：v3.1.0
+> 日期：2026-04-19
+> 状态：开发中（Phase 1 Step 4 完成，Step 5 待开始）
 
 ---
 
@@ -120,18 +120,22 @@ LemonClaw 采用 RivonClaw 验证过的 Vendor 子进程模式集成 OpenClaw：
 LemonClaw 集成架构：
 ├── vendor/openclaw/          — OpenClaw（git submodule 或 npm，零源码修改）
 ├── GatewayLauncher           — 启动/停止/重启 OpenClaw Gateway 子进程
-│   ├── spawn（Electron process.execPath 作为 Node 运行 vendor 入口）
+│   ├── spawn（系统 Node.js v24.x，非 Electron 内置 v20.x）
 │   ├── 指数退避重启策略（1000ms → 30000ms，健康阈值 60s 重置）
 │   ├── 就绪检测（stdout "listening on" + WebSocket probe）
 │   └── SIGUSR1 优雅重载（仅 Unix，Windows 回退 stop+start）
 ├── Config Bridge              — 配置翻译
-│   ├── LemonClaw SQLite settings → openclaw.json
-│   └── Zod schema 验证（stripUnknownKeys + fixSemanticErrors）
-├── Secret Injector            — 密钥注入（双路径）
+│   ├── LemonClaw 设置 → openclaw.json（auth.profiles + models.providers + plugins.entries）
+│   ├── apiKey 嵌入 models.providers（非单独 auth-profiles.json 用于模型配置）
+│   └── controlUi: { dangerouslyDisableDeviceAuth: true }（绕过设备认证）
+├── Secret Injector            — 密钥注入
 │   ├── LLM API Key → auth-profiles.json（Gateway 每次请求时读取，无需重启）
+│   ├── minimax → minimax-portal 名称映射
 │   └── 非 LLM Key → 环境变量（spawn 时注入）
 ├── RPC Client                 — WebSocket 双向通信
-│   └── ws://127.0.0.1:{port}（Ed25519 设备身份认证）
+│   ├── ws://127.0.0.1:{port}（token 认证，client.id: 'openclaw-control-ui'）
+│   ├── 等待 connect.challenge → 回复 connect（含 scopes + auth token）
+│   └── origin header（http://127.0.0.1:{port}）用于 Control UI 连接
 ├── Plugin Extensions          — 通过 OpenClaw Plugin SDK 钩子注入
 │   ├── lemonclaw-memory       — before_agent_start 注入记忆上下文
 │   └── lemonclaw-learning     — after_tool_call 收集经验数据
@@ -610,13 +614,13 @@ Week 11: 文档 + 打包（Windows exe + macOS dmg）+ 发布
 
 ### 8.2 MVP 验收标准
 
-- [ ] OpenClaw Gateway 子进程可以正常启动/停止/重启
-- [ ] 用户可以与 Agent 进行多轮对话（通过 Gateway RPC）
-- [ ] 对话历史被保存到本地（Gateway Session 管理）
-- [ ] 用户可以配置 API Key（通过 Config Bridge 注入 Gateway）
-- [ ] 用户可以在 2 个 Agent 之间切换
-- [ ] 对话中的重要信息被存储为记忆（MEMORY.md + USER.md）
-- [ ] 用户可以查看和搜索记忆
+- [x] OpenClaw Gateway 子进程可以正常启动/停止/重启 → Step 3
+- [ ] 用户可以与 Agent 进行多轮对话（通过 Gateway RPC）→ Step 5
+- [ ] 对话历史被保存到本地（Gateway Session 管理）→ Step 7
+- [ ] 用户可以配置 API Key（通过 Config Bridge 注入 Gateway）→ Step 6
+- [ ] 用户可以在 2 个 Agent 之间切换 → Step 8
+- [ ] 对话中的重要信息被存储为记忆（MEMORY.md + USER.md）→ Phase 2
+- [ ] 用户可以查看和搜索记忆 → Phase 2
 
 ### 8.3 MVP 舍弃功能
 
@@ -666,7 +670,7 @@ Week 11: 文档 + 打包（Windows exe + macOS dmg）+ 发布
 
 ---
 
-**文档版本**: v3.0.0
+**文档版本**: v3.1.0
 **创建时间**: 2026-04-16
-**最后更新**: 2026-04-18
-**状态**: 设计稿（Vendor 模式重构）
+**最后更新**: 2026-04-19
+**状态**: 开发中（Phase 1 Step 4 完成）

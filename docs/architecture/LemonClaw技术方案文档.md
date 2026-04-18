@@ -2,9 +2,9 @@
 
 > LemonClaw 的系统架构、接口定义、算法细节和技术选型
 >
-> 版本：v3.0.0
-> 日期：2026-04-18
-> 状态：设计稿（Vendor 模式重构）
+> 版本：v3.1.0
+> 日期：2026-04-19
+> 状态：开发中（Phase 1 Step 4 完成，Gateway 集成层已实现）
 
 ---
 
@@ -134,45 +134,60 @@ type ChangePolicy =
 
 // LemonClaw 设置 → openclaw.json 字段映射
 interface ConfigMapping {
-  'providerKeys.getActive()'       → 'agents.defaults.model.primary';
-  'settings["webSearch.enabled"]'  → 'tools.web.search';
-  'settings["embedding.enabled"]'  → 'agents.defaults.memorySearch';
-  'buildExtraProviderConfigs()'    → 'models.providers';
+  'agents.defaults.model.primary'  ← options.model || 'minimax-portal/MiniMax-M2.7-HighSpeed';
+  'auth.profiles'                  ← { 'minimax-portal:default': { provider, mode: 'api_key' } };
+  'models.providers'               ← { 'minimax-portal': { baseUrl, apiKey, api, models[] } };
+  'plugins.entries'                ← { 'minimax-portal-auth': { enabled: true } };
+  'gateway.controlUi'             ← { enabled: false, dangerouslyDisableDeviceAuth: true };
 }
 ```
 
 ### 2.3 Secret Injector（参考 RivonClaw secret-injector.ts）
 
 ```typescript
-// 双路径密钥注入
+// 密钥注入（参考 RivonClaw auth-profile-writer.ts）
 interface SecretInjector {
   // LLM API Key → auth-profiles.json（Gateway 每次请求时读取，无需重启）
-  injectToAuthProfiles(keys: ProviderKey[]): Promise<void>;
+  injectToAuthProfiles(keys: ProviderKey[]): void;
 
-  // 非 LLM Key → 环境变量（spawn 时注入）
+  // minimax → minimax-portal 名称映射
+  // profileId: `${gatewayProvider}:${key.id}` → 'minimax-portal:active'
+
+  // 非 LLM Key → 环境变量（MVP 阶段预留，暂不使用）
   resolveSecretEnv(): Record<string, string>;
 
-  // 会话结束时清理
-  clearAuthProfiles(): Promise<void>;
+  // 清理 auth-profiles（会话结束时可选调用）
+  clearAuthProfiles(): void;
 }
 ```
 
 ### 2.4 RPC Client（参考 RivonClaw rpc-client.ts）
 
 ```typescript
-// WebSocket 双向通信
+// WebSocket 双向通信（已实现）
 interface GatewayRpcClient {
-  connect(): Promise<void>;
+  connect(): Promise<void>;       // 等待 connect.challenge → 回复 connect（含 scopes + token）
   disconnect(): Promise<void>;
-  request(method: string, params: any): Promise<any>;
-  subscribe(event: string, handler: Function): void;
+  request(method: string, params: any): Promise<any>;  // JSON-RPC 帧：{type:'req', id, method, params}
+  isConnected(): boolean;
 
   // 常用 RPC 方法
-  chat.send(sessionKey: string, message: string): Promise<void>;
-  chat.history(sessionKey: string): Promise<Message[]>;
-  sessions.patch(sessionKey: string, patch: object): Promise<void>;
-  agents.list(): Promise<AgentInfo[]>;
+  chatSend(sessionKey: string, message: string): Promise<{ runId: string }>;
+  chatHistory(sessionKey: string): Promise<any[]>;
+  chatAbort(sessionKey: string, runId?: string): Promise<{ ok: boolean; aborted: boolean }>;
+  agentsList(): Promise<any[]>;
+  sessionsPatch(sessionKey: string, patch: Record<string, any>): Promise<void>;
+
+  // 事件监听（通过 EventEmitter）
+  on('event', (event: string, payload: any, seq: number) => void): void;
+  on('connected' | 'disconnected' | 'error', handler: Function): void;
 }
+
+// 握手协议要点（实际调试发现）：
+// - client.id: 'openclaw-control-ui'（触发 Control UI 逻辑）
+// - controlUi: { dangerouslyDisableDeviceAuth: true } 绕过设备认证
+// - WebSocket 需要 origin header: 'http://127.0.0.1:{port}'
+// - token 认证不含 nonce（nonce 仅用于 Ed25519 设备认证）
 ```
 
 ---
@@ -715,23 +730,30 @@ lemonclaw-mvp/
 
 ### 核心文件清单
 
-| 文件 | 作用 | Phase |
-|------|------|-------|
+| 文件 | 作用 | Step |
+|------|------|------|
 | `src/main/index.ts` | 主进程入口 | 1 |
-| `src/main/gateway/launcher.ts` | Gateway 子进程管理 | 1 |
-| `src/main/gateway/config-bridge.ts` | 配置桥接 | 1 |
-| `src/main/gateway/secret-injector.ts` | 密钥注入 | 1 |
-| `src/main/gateway/rpc-client.ts` | WebSocket RPC | 1 |
-| `src/main/ipc-handlers.ts` | IPC 路由 | 1 |
-| `src/main/preload/index.ts` | contextBridge API | 1 |
-| `src/renderer/src/lib/host-api.ts` | IPC 抽象层 | 1 |
-| `src/extensions/lemonclaw-memory/` | 记忆注入插件 | 1 |
-| `src/main/storage/database.ts` | SQLite 数据库 | 2 |
-| `src/main/memory/MemoryManager.ts` | 记忆管理 | 2 |
-| `src/main/memory/TrustScorer.ts` | 信任评分 | 2 |
-| `src/main/memory/ContextCompressor.ts` | 上下文压缩 | 2 |
-| `src/main/learning/ExperienceCollector.ts` | 经验收集 | 3 |
-| `src/main/learning/ReflectionEngine.ts` | 反思引擎 | 3 |
+| `src/main/gateway/launcher.ts` | Gateway 子进程管理 | 3 ✅ |
+| `src/main/gateway/config-bridge.ts` | 配置桥接（auth.profiles + models.providers） | 3 ✅ |
+| `src/main/gateway/secret-injector.ts` | 密钥注入（minimax→minimax-portal 映射） | 3 ✅ |
+| `src/main/gateway/rpc-client.ts` | WebSocket RPC（Control UI + origin header） | 3 ✅ |
+| `src/main/ipc-handlers.ts` | IPC 路由 | 3-8 |
+| `src/preload/index.ts` | contextBridge API | 3-8 |
+| `src/renderer/src/lib/host-api.ts` | IPC 抽象层 | 3-8 |
+| `src/renderer/src/stores/gateway-store.ts` | Gateway 状态管理 | 4 ✅ |
+| `src/renderer/src/stores/chat-store.ts` | 聊天 Store（Mock → 真实 RPC） | 4-5 |
+| `src/renderer/src/stores/agent-store.ts` | Agent Store | 8 |
+| `src/renderer/src/components/chat/` | 聊天 UI 组件 | 4 ✅ |
+| `src/renderer/src/pages/ChatPage.tsx` | 聊天页面 | 4 ✅ |
+| `src/renderer/src/pages/SettingsPage.tsx` | 设置页面 | 6 |
+| `src/renderer/src/pages/AgentsPage.tsx` | Agent 页面 | 8 |
+| `src/extensions/lemonclaw-memory/` | 记忆注入插件 | 9 |
+| `src/main/storage/database.ts` | SQLite 数据库 | 10 |
+| `src/main/memory/MemoryManager.ts` | 记忆管理 | 10 |
+| `src/main/memory/TrustScorer.ts` | 信任评分 | 10 |
+| `src/main/memory/ContextCompressor.ts` | 上下文压缩 | 11 |
+| `src/main/learning/ExperienceCollector.ts` | 经验收集 | 12 |
+| `src/main/learning/ReflectionEngine.ts` | 反思引擎 | 13 |
 
 ---
 

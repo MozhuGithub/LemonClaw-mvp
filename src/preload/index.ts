@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('lemonclaw', {
     ipcRenderer.invoke('chat:send', sessionKey, message),
   chatHistory: (sessionKey: string) =>
     ipcRenderer.invoke('chat:history', sessionKey),
+  chatAbort: (sessionKey: string, runId?: string) =>
+    ipcRenderer.invoke('chat:abort', sessionKey, runId),
   onChatEvent: (callback: (event: string, payload: any) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, ev: string, payload: any) => callback(ev, payload)
     ipcRenderer.on('chat:event', handler)

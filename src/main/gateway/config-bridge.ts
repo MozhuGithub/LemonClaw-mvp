@@ -20,22 +20,41 @@ export interface GatewayConfig {
     port: number
     mode: string
     auth: { mode: string; token: string }
-    controlUi: { enabled: boolean; dangerouslyDisableDeviceAuth: boolean }
+    controlUi?: { enabled: boolean; dangerouslyDisableDeviceAuth: boolean }
+  }
+  auth?: {
+    profiles: Record<string, { provider: string; mode: string }>
   }
   agents: {
     defaults: {
-      model: { primary: string }
+      model: { primary: string; fallbacks?: string[] }
       workspace: string
     }
+  }
+  models?: {
+    mode: string
+    providers: Record<string, {
+      baseUrl: string
+      api?: string
+      apiKey?: string
+      models: Array<{
+        id: string
+        name: string
+        reasoning: boolean
+        input: string[]
+        cost: { input: number; output: number; cacheRead: number; cacheWrite: number }
+        contextWindow: number
+        maxTokens: number
+      }>
+    }>
   }
   tools: {
     profile: string
     exec: { host: string; security: string; ask: string }
   }
   plugins: {
-    allow: string[]
+    entries: Record<string, { enabled: boolean }>
     load: { paths: string[] }
-    deny: string[]
   }
   skills: {
     load: { extraDirs: string[] }
@@ -79,6 +98,7 @@ export function buildGatewayConfig(port: number, options?: {
   workspace?: string
   extensionsDir?: string
   skillsDir?: string
+  apiKey?: string
 }): GatewayConfig {
   const stateDir = join(app.getPath('userData'), 'openclaw-state')
   if (!existsSync(stateDir)) {
@@ -90,7 +110,12 @@ export function buildGatewayConfig(port: number, options?: {
 
   const pluginPaths = existsSync(extensionsDir) ? [extensionsDir] : []
   const skillDirs = existsSync(skillsDir) ? [skillsDir] : []
-  const pluginAllow = existsSync(extensionsDir) ? ['lemonclaw-memory', 'lemonclaw-learning'] : []
+
+  const apiKey = options?.apiKey || ''
+  const providerEntries: Record<string, { enabled: boolean }> = {}
+  if (apiKey) {
+    providerEntries['minimax-portal-auth'] = { enabled: true }
+  }
 
   return {
     gateway: {
@@ -99,10 +124,36 @@ export function buildGatewayConfig(port: number, options?: {
       auth: { mode: 'token', token: getAuthToken() },
       controlUi: { enabled: false, dangerouslyDisableDeviceAuth: true },
     },
+    auth: {
+      profiles: {
+        'minimax-portal:default': { provider: 'minimax-portal', mode: 'api_key' },
+      },
+    },
     agents: {
       defaults: {
-        model: { primary: options?.model || 'theta/glm-5.1' },
+        model: { primary: options?.model || 'minimax-portal/MiniMax-M2.7-HighSpeed' },
         workspace: options?.workspace || stateDir,
+      },
+    },
+    models: {
+      mode: 'merge',
+      providers: {
+        'minimax-portal': {
+          baseUrl: 'https://api.minimaxi.com/anthropic',
+          apiKey,
+          api: 'anthropic-messages',
+          models: [
+            {
+              id: 'MiniMax-M2.7-HighSpeed',
+              name: 'MiniMax M2.7 HighSpeed',
+              reasoning: true,
+              input: ['text'],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 200000,
+              maxTokens: 8192,
+            },
+          ],
+        },
       },
     },
     tools: {
@@ -110,9 +161,8 @@ export function buildGatewayConfig(port: number, options?: {
       exec: { host: 'gateway', security: 'full', ask: 'off' },
     },
     plugins: {
-      allow: pluginAllow,
+      entries: providerEntries,
       load: { paths: pluginPaths },
-      deny: [],
     },
     skills: {
       load: { extraDirs: skillDirs },
@@ -137,7 +187,7 @@ export type ChangePolicy = 'none' | 'reload_config' | 'restart_process'
 export function getChangePolicy(oldConfig: GatewayConfig, newConfig: GatewayConfig): ChangePolicy {
   if (oldConfig.gateway.port !== newConfig.gateway.port) return 'restart_process'
   if (oldConfig.agents.defaults.model.primary !== newConfig.agents.defaults.model.primary) return 'reload_config'
-  if (JSON.stringify(oldConfig.plugins) !== JSON.stringify(newConfig.plugins)) return 'restart_process'
+  if (JSON.stringify(oldConfig.plugins?.entries) !== JSON.stringify(newConfig.plugins?.entries)) return 'restart_process'
   if (JSON.stringify(oldConfig.tools) !== JSON.stringify(newConfig.tools)) return 'reload_config'
   return 'none'
 }

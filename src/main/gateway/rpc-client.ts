@@ -38,7 +38,9 @@ export class GatewayRpcClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       const url = `ws://127.0.0.1:${this.port}`
 
-      this.ws = new WebSocket(url)
+      this.ws = new WebSocket(url, {
+        headers: { origin: `http://127.0.0.1:${this.port}` },
+      })
 
       const connectTimeout = setTimeout(() => {
         this.ws?.close()
@@ -102,7 +104,7 @@ export class GatewayRpcClient extends EventEmitter {
       minProtocol: 3,
       maxProtocol: 3,
       client: {
-        id: 'node-host',
+        id: 'openclaw-control-ui',
         version: '0.1.0',
         platform: process.platform,
         mode: 'ui',
@@ -205,8 +207,8 @@ export class GatewayRpcClient extends EventEmitter {
 
   // === 常用 RPC 方法 ===
 
-  async chatSend(sessionKey: string, message: string): Promise<void> {
-    await this.request('chat.send', { sessionKey, message })
+  async chatSend(sessionKey: string, message: string): Promise<{ runId: string }> {
+    return this.request('chat.send', { sessionKey, message, idempotencyKey: randomUUID() })
   }
 
   async chatHistory(sessionKey: string): Promise<any[]> {
@@ -215,6 +217,10 @@ export class GatewayRpcClient extends EventEmitter {
 
   async agentsList(): Promise<any[]> {
     return this.request('agents.list', {})
+  }
+
+  async chatAbort(sessionKey: string, runId?: string): Promise<{ ok: boolean; aborted: boolean }> {
+    return this.request('chat.abort', { sessionKey, runId })
   }
 
   async sessionsPatch(sessionKey: string, patch: Record<string, any>): Promise<void> {

@@ -66,7 +66,7 @@ These guidelines are working if: fewer unnecessary changes in diffs, fewer rewri
 - **后端**: TypeScript (主进程)
 - **存储**: SQLite (better-sqlite3) + Markdown 文件
 - **包管理**: pnpm
-- **AI 模型**: Theta (GLM-5.1) / OpenAI 兼容接口（通过 OpenClaw Gateway 调用）
+- **AI 模型**: Minimax MiniMax-M2.7-HighSpeed（Anthropic 兼容接口，通过 OpenClaw Gateway 调用）
 
 ## 项目结构
 
@@ -144,10 +144,15 @@ cd vendor/openclaw && pnpm install
 
 ## 核心模块（按 MVP 优先级）
 
-1. **Gateway 集成** — GatewayLauncher + Config Bridge + RPC Client（参考 RivonClaw launcher.ts、config-writer.ts、rpc-client.ts）
-2. **记忆系统** — 四层记忆 + 信任评分 + 冻结快照 + 上下文压缩（参考 Hermes memory_manager.py、context_compressor.py）
-3. **学习引擎** — 经验收集 + 主动反思 + 技能修补（LemonClaw 原创）
-4. **Plugin Extensions** — 记忆注入 + 经验收集 hook（参考 RivonClaw extensions/）
+1. **Gateway 集成** ✅ — GatewayLauncher + Config Bridge + RPC Client（Step 3 完成）
+2. **基础聊天 UI** ✅ — Chat Store + 消息组件 + 流式渲染（Step 4 完成，Mock 模式）
+3. **LLM 接通** ⬜ — Config Bridge 按可用配置格式生成 openclaw.json，Chat Store 切真实 RPC（Step 5）
+4. **Settings 页** ⬜ — API Key 配置 → Secret Injector → auth-profiles.json（Step 6）
+5. **会话持久化** ⬜ — 历史加载、多轮上下文、重启恢复（Step 7）
+6. **Agent 管理** ⬜ — Agent 列表、切换（Step 8）
+7. **Plugin Extensions** ⬜ — lemonclaw-memory Extension 注册（Step 9）
+8. **记忆系统** ⬜ — 四层记忆 + 信任评分 + 冻结快照 + 上下文压缩（Step 10-11，Phase 2）
+9. **学习引擎** ⬜ — 经验收集 + 主动反思 + 技能修补（Step 12-13，Phase 3）
 
 ## 工作模式
 
