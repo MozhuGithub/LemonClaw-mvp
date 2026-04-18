@@ -80,6 +80,12 @@ pnpm start          # 预览构建产物
 
 **注意**: 开发时需确保 `ELECTRON_RUN_AS_NODE` 环境变量未设置（dev 脚本已用 `env -u` 自动移除）。
 
+**首次 setup**：clone 后需要初始化 submodule 并安装依赖：
+```bash
+git submodule update --init --recursive
+cd vendor/openclaw && pnpm install
+```
+
 ## 核心模块（按 MVP 优先级）
 
 1. **Gateway 集成** — GatewayLauncher + Config Bridge + RPC Client（参考 RivonClaw launcher.ts、config-writer.ts、rpc-client.ts）
