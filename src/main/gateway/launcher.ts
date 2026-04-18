@@ -4,7 +4,7 @@ import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { app } from 'electron'
 import { getVendorEntryPath, getNodeBin } from './vendor'
-import { buildGatewayConfig, writeGatewayConfig, getConfigDir, type GatewayConfig } from './config-bridge'
+import { getAuthToken, getConfigDir } from './config-bridge'
 import { injectToAuthProfiles, clearAuthProfiles, resolveSecretEnv, type ProviderKey } from './secret-injector'
 
 export type GatewayState = 'stopped' | 'starting' | 'running' | 'error'
@@ -26,8 +26,6 @@ export class GatewayLauncher extends EventEmitter {
   private readonly healthyThresholdMs = 60000
   private startTime = 0
   private restartTimer: ReturnType<typeof setTimeout> | null = null
-  private configPath = ''
-  private currentConfig: GatewayConfig | null = null
 
   constructor(
     private port: number = 3212,
@@ -60,24 +58,21 @@ export class GatewayLauncher extends EventEmitter {
         injectToAuthProfiles(this.providerKeys)
       }
 
-      // 2. 生成并写入配置
-      this.currentConfig = buildGatewayConfig(this.port)
-      this.configPath = writeGatewayConfig(this.currentConfig)
-
-      // 3. 构建环境变量
+      // 2. 构建环境变量
+      const configDir = getConfigDir()
       const env: Record<string, string> = {
         ...process.env as Record<string, string>,
         ...resolveSecretEnv(),
-        ELECTRON_RUN_AS_NODE: '1',
-        OPENCLAW_CONFIG_PATH: this.configPath,
         OPENCLAW_STATE_DIR: stateDir,
+        OPENCLAW_CONFIG_PATH: join(configDir, 'openclaw.json'),
         OPENCLAW_NO_RESPAWN: '1',
         OPENCLAW_SKIP_BROWSER_CONTROL_SERVER: '1',
         OPENCLAW_DISABLE_BONJOUR: '1',
       }
 
-      // 4. 启动子进程（detached 创建新进程组，便于整棵进程树 kill）
-      this.process = spawn(nodeBin, [entryPath, 'gateway'], {
+      // 4. 启动子进程（CLI 参数传 port 和 token，不依赖 config 文件）
+      const authToken = getAuthToken()
+      this.process = spawn(nodeBin, [entryPath, 'gateway', '--port', String(this.port), '--token', authToken], {
         env,
         cwd: stateDir,
         stdio: ['ignore', 'pipe', 'pipe'],

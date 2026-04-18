@@ -88,6 +88,10 @@ export function buildGatewayConfig(port: number, options?: {
   const extensionsDir = options?.extensionsDir || join(__dirname, '../../extensions')
   const skillsDir = options?.skillsDir || join(app.getPath('userData'), 'skills')
 
+  const pluginPaths = existsSync(extensionsDir) ? [extensionsDir] : []
+  const skillDirs = existsSync(skillsDir) ? [skillsDir] : []
+  const pluginAllow = existsSync(extensionsDir) ? ['lemonclaw-memory', 'lemonclaw-learning'] : []
+
   return {
     gateway: {
       port,
@@ -106,12 +110,12 @@ export function buildGatewayConfig(port: number, options?: {
       exec: { host: 'gateway', security: 'full', ask: 'off' },
     },
     plugins: {
-      allow: ['lemonclaw-memory', 'lemonclaw-learning'],
-      load: { paths: [extensionsDir] },
+      allow: pluginAllow,
+      load: { paths: pluginPaths },
       deny: [],
     },
     skills: {
-      load: { extraDirs: [skillsDir] },
+      load: { extraDirs: skillDirs },
     },
     session: {
       reset: { mode: 'idle', idleMinutes: 10080 },

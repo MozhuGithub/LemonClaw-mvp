@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { GatewayLauncher, type GatewayState } from './gateway/launcher'
 import { GatewayRpcClient } from './gateway/rpc-client'
-import { buildGatewayConfig, writeGatewayConfig, getChangePolicy, type GatewayConfig } from './gateway/config-bridge'
+import { buildGatewayConfig, writeGatewayConfig, getChangePolicy } from './gateway/config-bridge'
 import { injectToAuthProfiles, type ProviderKey } from './gateway/secret-injector'
 
 let launcher: GatewayLauncher | null = null
@@ -12,26 +12,45 @@ export function initIpcHandlers(): void {
   // === Gateway ===
 
   ipcMain.handle('gateway:start', async () => {
+    // 确保 Gateway 启动前配置文件已写入
+    const config = buildGatewayConfig(3212)
+    writeGatewayConfig(config)
+
     if (!launcher) {
       launcher = new GatewayLauncher(3212, providerKeys)
       launcher.on('stateChange', (state: GatewayState) => {
+        console.log('[gateway:state]', state)
         BrowserWindow.getAllWindows().forEach(w => w.webContents.send('gateway:stateChange', state))
       })
       launcher.on('stdout', (line: string) => {
+        console.log('[gateway:stdout]', line)
         if (line.includes('listening on') && launcher) {
           const port = launcher.getPort()
+          console.log('[gateway] detected listening, connecting RPC on port', port)
           rpcClient = new GatewayRpcClient(port)
           rpcClient.on('connected', () => {
+            console.log('[gateway:rpc] connected')
             BrowserWindow.getAllWindows().forEach(w => w.webContents.send('gateway:stateChange', 'running'))
+          })
+          rpcClient.on('disconnected', () => {
+            console.log('[gateway:rpc] disconnected')
           })
           rpcClient.on('event', (event: string, payload: any) => {
             BrowserWindow.getAllWindows().forEach(w => w.webContents.send('chat:event', event, payload))
           })
-          rpcClient.connect().catch(() => {})
+          rpcClient.connect().then(() => {
+            console.log('[gateway:rpc] handshake completed')
+          }).catch((err) => {
+            console.error('[gateway:rpc] handshake failed:', err.message)
+          })
         }
+      })
+      launcher.on('stderr', (line: string) => {
+        console.error('[gateway:stderr]', line)
       })
     }
     await launcher.start()
+    return { state: launcher.getState(), port: launcher.getPort() }
   })
 
   ipcMain.handle('gateway:stop', async () => {

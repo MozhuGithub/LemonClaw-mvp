@@ -102,15 +102,15 @@ export class GatewayRpcClient extends EventEmitter {
       minProtocol: 3,
       maxProtocol: 3,
       client: {
-        id: 'lemonclaw',
+        id: 'node-host',
         version: '0.1.0',
         platform: process.platform,
         mode: 'ui',
       },
       role: 'operator',
-      scopes: ['operator.admin', 'operator.read', 'operator.write'],
+      scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals', 'operator.pairing'],
+      caps: ['tool-events'],
       auth: { token: getAuthToken() },
-      ...(nonce ? { nonce } : {}),
     })
 
     if (!resp || resp.error) {
