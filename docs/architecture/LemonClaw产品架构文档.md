@@ -4,7 +4,7 @@
 >
 > 版本：v3.1.0
 > 日期：2026-04-19
-> 状态：开发中（Phase 1 Step 4 完成，Step 5 待开始）
+> 状态：开发中（Phase 1 Step 5 完成，下一步 Step 6 Settings 页对接）
 
 ---
 
@@ -615,7 +615,7 @@ Week 11: 文档 + 打包（Windows exe + macOS dmg）+ 发布
 ### 8.2 MVP 验收标准
 
 - [x] OpenClaw Gateway 子进程可以正常启动/停止/重启 → Step 3
-- [ ] 用户可以与 Agent 进行多轮对话（通过 Gateway RPC）→ Step 5
+- [x] 用户可以与 Agent 进行多轮对话（通过 Gateway RPC）→ Step 5 ✅
 - [ ] 对话历史被保存到本地（Gateway Session 管理）→ Step 7
 - [ ] 用户可以配置 API Key（通过 Config Bridge 注入 Gateway）→ Step 6
 - [ ] 用户可以在 2 个 Agent 之间切换 → Step 8
@@ -673,4 +673,4 @@ Week 11: 文档 + 打包（Windows exe + macOS dmg）+ 发布
 **文档版本**: v3.1.0
 **创建时间**: 2026-04-16
 **最后更新**: 2026-04-19
-**状态**: 开发中（Phase 1 Step 4 完成）
+**状态**: 开发中（Phase 1 Step 5 完成）

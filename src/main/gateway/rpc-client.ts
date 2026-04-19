@@ -107,7 +107,7 @@ export class GatewayRpcClient extends EventEmitter {
         id: 'openclaw-control-ui',
         version: '0.1.0',
         platform: process.platform,
-        mode: 'ui',
+        mode: 'webchat',
       },
       role: 'operator',
       scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals', 'operator.pairing'],

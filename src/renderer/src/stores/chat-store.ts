@@ -26,18 +26,30 @@ function genId(): string {
   return `msg-${nextId++}-${Date.now()}`
 }
 
-// Mock 流式回复
-const MOCK_REPLIES: Record<string, string> = {
-  default: '你好！我是 LemonClaw 助手，当前处于演示模式。大模型尚未接入，请先配置 API Key。',
+function extractText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    const block = content.find((b: any) => b.type === 'text')
+    return block?.text ?? ''
+  }
+  return ''
 }
 
-async function mockStreamReply(text: string, onUpdate: (content: string) => void): Promise<string> {
-  const reply = MOCK_REPLIES.default
-  for (let i = 0; i < reply.length; i++) {
-    await new Promise((r) => setTimeout(r, 20))
-    onUpdate(reply.slice(0, i + 1))
+function parseHistoryMessages(data: any): ChatMessage[] {
+  const raw = Array.isArray(data) ? data : data?.messages
+  if (!Array.isArray(raw)) return []
+  const msgs: ChatMessage[] = []
+  for (const m of raw) {
+    if (m.role === 'user' || m.role === 'assistant') {
+      msgs.push({
+        id: m.id ?? genId(),
+        role: m.role,
+        content: extractText(m.content),
+        timestamp: m.timestamp ?? Date.now(),
+      })
+    }
   }
-  return reply
+  return msgs
 }
 
 export const useChatStore = create<ChatStoreState>((set, get) => ({
@@ -47,47 +59,45 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   isSending: false,
 
   loadHistory: async () => {
-    // 暂不加载历史，避免残留消息
+    try {
+      const data = await hostApi.chatHistory('main')
+      const msgs = parseHistoryMessages(data)
+      if (msgs.length > 0) set({ messages: msgs })
+    } catch {
+      // Gateway 未连接或历史为空
+    }
   },
 
   send: async (text: string) => {
-    const userMsg: ChatMessage = {
-      id: genId(),
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-    }
-    const assistantMsg: ChatMessage = {
-      id: genId(),
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      isStreaming: true,
-    }
-
+    const assistantId = genId()
     set((state) => ({
-      messages: [...state.messages, userMsg, assistantMsg],
+      messages: [...state.messages,
+        { id: genId(), role: 'user', content: text, timestamp: Date.now() },
+        { id: assistantId, role: 'assistant', content: '', timestamp: Date.now(), isStreaming: true },
+      ],
       isSending: true,
     }))
 
-    // Mock 模式：模拟流式回复
-    await mockStreamReply(text, (content) => {
+    try {
+      const { runId } = await hostApi.chatSend('main', text)
+      set({ currentRunId: runId })
+    } catch (err: any) {
       set((state) => ({
         messages: state.messages.map((m) =>
-          m.id === assistantMsg.id ? { ...m, content } : m
+          m.id === assistantId
+            ? { ...m, content: `发送失败: ${err.message}`, isStreaming: false, isError: true }
+            : m
         ),
+        isSending: false,
       }))
-    })
-
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === assistantMsg.id ? { ...m, isStreaming: false } : m
-      ),
-      isSending: false,
-    }))
+    }
   },
 
   abort: async () => {
+    const { currentRunId } = get()
+    try {
+      await hostApi.chatAbort('main', currentRunId ?? undefined)
+    } catch { /* 忽略 */ }
     set({ currentRunId: null, isSending: false })
     const { messages } = get()
     const last = [...messages].reverse().find((m) => m.role === 'assistant' && m.isStreaming)
@@ -101,7 +111,96 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   init: () => {
-    // 预留：后续接真实 API 时启用事件监听
-    return () => {}
+    console.log('[chat-store] init')
+    const unsub = hostApi.onChatEvent((event: string, payload: any) => {
+      console.log('[chat-store] event:', event, 'state:', payload?.state)
+      if (event !== 'chat') return
+
+      const { messages } = get()
+      console.log('[chat-store] messages count:', messages.length, 'streaming count:', messages.filter(m => m.isStreaming).length)
+      const streamingMsg = [...messages].reverse().find((m) => m.role === 'assistant' && m.isStreaming)
+      console.log('[chat-store] streamingMsg:', streamingMsg?.id)
+      if (!streamingMsg) return
+
+      switch (payload.state) {
+        case 'delta': {
+          const text = extractText(payload.message?.content)
+          console.log('[chat-store] delta text length:', text.length)
+          if (text) {
+            set((state) => ({
+              messages: state.messages.map((m) =>
+                m.id === streamingMsg.id ? { ...m, content: text } : m
+              ),
+            }))
+          }
+          break
+        }
+        case 'final': {
+          console.log('[chat-store] final handler, payload:', JSON.stringify(payload)?.slice(0, 200))
+          const text = extractText(payload.message?.content)
+          console.log('[chat-store] final text length:', text.length)
+          if (text) {
+            // Delta 已经给了内容，直接 final
+            console.log('[chat-store] setting final state')
+            set((state) => ({
+              messages: state.messages.map((m) =>
+                m.id === streamingMsg.id ? { ...m, content: text, isStreaming: false } : m
+              ),
+              isSending: false,
+              currentRunId: null,
+            }))
+            console.log('[chat-store] final state set done')
+          } else {
+            // Gateway 没推 message，用 chat.history 拉取
+            hostApi.chatHistory('main').then((data) => {
+              const history = parseHistoryMessages(data)
+              if (history.length > 0) {
+                set({ messages: history, isSending: false, currentRunId: null })
+              } else {
+                set((state) => ({
+                  messages: state.messages.map((m) =>
+                    m.id === streamingMsg.id ? { ...m, isStreaming: false } : m
+                  ),
+                  isSending: false,
+                  currentRunId: null,
+                }))
+              }
+            }).catch(() => {
+              set((state) => ({
+                messages: state.messages.map((m) =>
+                  m.id === streamingMsg.id ? { ...m, isStreaming: false } : m
+                ),
+                isSending: false,
+                currentRunId: null,
+              }))
+            })
+          }
+          break
+        }
+        case 'error': {
+          set((state) => ({
+            messages: state.messages.map((m) =>
+              m.id === streamingMsg.id
+                ? { ...m, content: payload.errorMessage || '发生错误', isStreaming: false, isError: true }
+                : m
+            ),
+            isSending: false,
+            currentRunId: null,
+          }))
+          break
+        }
+        case 'aborted': {
+          set((state) => ({
+            messages: state.messages.map((m) =>
+              m.id === streamingMsg.id ? { ...m, isStreaming: false } : m
+            ),
+            isSending: false,
+            currentRunId: null,
+          }))
+          break
+        }
+      }
+    })
+    return unsub
   },
 }))

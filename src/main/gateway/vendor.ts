@@ -1,5 +1,5 @@
-import { join, resolve } from 'path'
-import { existsSync } from 'fs'
+import { join } from 'path'
+import { existsSync, readFileSync } from 'fs'
 import { app } from 'electron'
 import { homedir } from 'os'
 
@@ -22,7 +22,7 @@ function getVendorDir(): string {
   if (app.isPackaged) {
     return join(process.resourcesPath, 'vendor', 'openclaw')
   }
-  return resolve(__dirname, '../../../vendor/openclaw')
+  return join(app.getAppPath(), 'vendor', 'openclaw')
 }
 
 export function getVendorEntryPath(): string {
@@ -67,4 +67,13 @@ export function getVendorDirPath(): string {
  */
 export function getNodeBin(): string {
   return 'node'
+}
+
+export function getVendorVersion(): string {
+  const vendorDir = getVendorDir()
+  try {
+    const pkg = JSON.parse(readFileSync(join(vendorDir, 'package.json'), 'utf-8'))
+    if (pkg.version) return pkg.version
+  } catch { /* ignore */ }
+  return '0.0.0'
 }

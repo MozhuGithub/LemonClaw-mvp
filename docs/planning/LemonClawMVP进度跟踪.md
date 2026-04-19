@@ -16,7 +16,7 @@
 
 | Phase | 目标 | 预计周期 | 状态 | 进度 |
 |-------|------|---------|------|------|
-| Phase 1 | Gateway 集成 + Electron 壳 + 基础对话 | 3-4 周 | 🔶 进行中 | ~45% |
+| Phase 1 | Gateway 集成 + Electron 壳 + 基础对话 | 3-4 周 | 🔶 进行中 | ~55% |
 | Phase 2 | 记忆系统 — 参考 Hermes 四层分层 | 3 周 | ⬜ 未开始 | 0% |
 | Phase 3 | 学习引擎 — LemonClaw 原创 | 3 周 | ⬜ 未开始 | 0% |
 | Phase 4 | 优化发布 — 产品化 | 2 周 | ⬜ 未开始 | 0% |
@@ -82,13 +82,13 @@
 
 ---
 
-### Step 5: LLM 接通 ⬜
+### Step 5: LLM 接通 ✅
 
-**做什么**：Chat Store 从 mock 切换到真实 RPC（chat.send → delta/final 事件流），Config Bridge 按用户可用配置格式生成 openclaw.json，API Key 临时硬编码验证通路
+**做什么**：Chat Store 从 mock 切换到真实 RPC（chat.send → delta/final 事件流），API Key 从 auth-profiles.json 自动播种，Config Bridge 按用户可用配置格式生成 openclaw.json
 
 **有什么用**：最关键的一步——发消息能收到 AI 真实回复
 
-**状态**：⬜ 未开始
+**状态**：✅ 完成（2026-04-19）
 
 ---
 
@@ -133,7 +133,7 @@
 **Phase 1 交付物**：
 - [x] OpenClaw Gateway 子进程可以正常启动/停止/重启
 - [x] 基础聊天 UI 正常显示（Mock 模式）
-- [ ] 用户可以与 Agent 进行多轮对话（通过 Gateway RPC）→ Step 5
+- [x] 用户可以与 Agent 进行多轮对话（通过 Gateway RPC）→ Step 5 ✅
 - [ ] 对话历史被保存到本地（Gateway Session 管理）→ Step 7
 - [ ] 用户可以配置 API Key（通过 Settings 页）→ Step 6
 - [ ] 用户可以在 2 个 Agent 之间切换 → Step 8
@@ -235,6 +235,7 @@
 | 2026-04-18 | Step 3 完成：Gateway 集成层（5 模块 + IPC + host-api，端到端验证通过） |
 | 2026-04-19 | Step 4 完成：基础聊天壳子（Mock 模式，UI 流程跑通） |
 | 2026-04-19 | MVP 规划重构：Step 4 拆分为 Step 4-9，每步独立可验证 |
+| 2026-04-19 | Step 5 完成：LLM 接通（Chat Store 切真实 RPC，Minimax 流式回复验证通过） |
 
 ---
 
@@ -256,7 +257,17 @@
 
 ---
 
-## 架构变更记录
+## 遗留未解决问题
+
+> 记录 Step 1-5 中发现但尚未解决的技术问题，按优先级排序
+
+| # | 问题 | 位置 | 状态 | 备注 |
+|---|------|------|------|------|
+| 1 | SettingsPage 默认值与后端不一致 | `SettingsPage.tsx` | 需 Step 6 修正 | provider=openai/model=glm-5.1 vs 后端 minimax-portal/MiniMax-M2.7-HighSpeed |
+| 2 | Agent 切换未生效 | `agent-store.ts` selectAgent() | 需 Step 8 修复 | 只更新本地状态，未调用 sessions.patch RPC |
+| 3 | probeSidecar() 孤立代码 | `launcher.ts:155` | 需清理或整合 | 约 90 行已实现但主流程从未调用 |
+| 4 | chat-store.ts 调试日志 | `chat-store.ts` | 需清理 | 约 15 处 console.log 影响可读性 |
+| 5 | 命令行窗口闪烁 | Gateway 内部 | 已知问题，低优先级 | DEP0190 警告，OpenClaw 内部 spawn shell 命令，不可完全消除 |
 
 ### v3.0.0（2026-04-18）— Vendor 子进程模式重构
 

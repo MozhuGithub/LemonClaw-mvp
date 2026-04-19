@@ -1,4 +1,6 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, app } from 'electron'
+import { join } from 'path'
+import { existsSync, readFileSync } from 'fs'
 import { GatewayLauncher, type GatewayState } from './gateway/launcher'
 import { GatewayRpcClient } from './gateway/rpc-client'
 import { buildGatewayConfig, writeGatewayConfig, getChangePolicy } from './gateway/config-bridge'
@@ -9,10 +11,23 @@ let rpcClient: GatewayRpcClient | null = null
 let providerKeys: ProviderKey[] = []
 
 export function initIpcHandlers(): void {
+  // 从 LemonClaw 自己的 auth-profiles.json 恢复已保存的 API Key
+  try {
+    const authPath = join(app.getPath('userData'), 'openclaw-state', 'agents', 'main', 'agent', 'auth-profiles.json')
+    if (existsSync(authPath)) {
+      const store = JSON.parse(readFileSync(authPath, 'utf-8'))
+      for (const [id, profile] of Object.entries(store.profiles ?? {})) {
+        const p = profile as { type: string; provider: string; key: string }
+        if (p.type === 'api_key' && p.key) {
+          providerKeys.push({ id: id.split(':')[1] || id, provider: p.provider, apiKey: p.key })
+        }
+      }
+    }
+  } catch { /* 无已保存的密钥 */ }
   // === Gateway ===
 
   ipcMain.handle('gateway:start', async () => {
-    const apiKey = providerKeys.find(k => k.provider === 'minimax')?.apiKey || ''
+    const apiKey = providerKeys.find(k => k.provider === 'minimax' || k.provider === 'minimax-portal')?.apiKey || ''
     const config = buildGatewayConfig(3212, { apiKey })
     writeGatewayConfig(config)
 
@@ -26,9 +41,9 @@ export function initIpcHandlers(): void {
       })
       launcher.on('stdout', (line: string) => {
         console.log('[gateway:stdout]', line)
-        if (line.includes('listening on') && launcher) {
+        if (line.includes('embedded acpx runtime backend ready') && launcher) {
           const port = launcher.getPort()
-          console.log('[gateway] detected listening, connecting RPC on port', port)
+          console.log('[gateway] detected ready, connecting RPC on port', port)
           rpcClient = new GatewayRpcClient(port)
           rpcClient.on('connected', () => {
             console.log('[gateway:rpc] connected')
@@ -38,6 +53,7 @@ export function initIpcHandlers(): void {
             console.log('[gateway:rpc] disconnected')
           })
           rpcClient.on('event', (event: string, payload: any) => {
+            console.log('[gateway:event]', event, JSON.stringify(payload)?.slice(0, 300))
             BrowserWindow.getAllWindows().forEach(w => w.webContents.send('chat:event', event, payload))
           })
           rpcClient.connect().then(() => {
@@ -75,7 +91,10 @@ export function initIpcHandlers(): void {
 
   ipcMain.handle('chat:send', async (_event, sessionKey: string, message: string) => {
     if (!rpcClient?.isConnected()) throw new Error('Gateway not connected')
-    return rpcClient.chatSend(sessionKey, message)
+    console.log('[chat:send]', sessionKey, message.slice(0, 50))
+    const result = await rpcClient.chatSend(sessionKey, message)
+    console.log('[chat:send] result:', JSON.stringify(result))
+    return result
   })
 
   ipcMain.handle('chat:history', async (_event, sessionKey: string) => {

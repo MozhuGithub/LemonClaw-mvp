@@ -112,9 +112,10 @@ export function buildGatewayConfig(port: number, options?: {
   const skillDirs = existsSync(skillsDir) ? [skillsDir] : []
 
   const apiKey = options?.apiKey || ''
-  const providerEntries: Record<string, { enabled: boolean }> = {}
-  if (apiKey) {
-    providerEntries['minimax-portal-auth'] = { enabled: true }
+  const pluginEntries: Record<string, { enabled: boolean }> = {}
+  // 禁用不需要的 bundled 插件，保留 acpx（RPC 握手依赖）
+  for (const id of ['browser', 'device-pair', 'phone-control', 'talk-voice']) {
+    pluginEntries[id] = { enabled: false }
   }
 
   return {
@@ -161,7 +162,7 @@ export function buildGatewayConfig(port: number, options?: {
       exec: { host: 'gateway', security: 'full', ask: 'off' },
     },
     plugins: {
-      entries: providerEntries,
+      entries: pluginEntries,
       load: { paths: pluginPaths },
     },
     skills: {

@@ -45,7 +45,10 @@ function readExisting(): AuthProfilesStore {
   const filePath = getAuthProfilesPath()
   if (existsSync(filePath)) {
     try {
-      return JSON.parse(readFileSync(filePath, 'utf-8'))
+      const store = JSON.parse(readFileSync(filePath, 'utf-8'))
+      // 确保 order 字段存在（旧版本 auth-profiles.json 可能缺少此字段）
+      if (!store.order) store.order = {}
+      return store
     } catch {
       // 文件损坏，重新创建
     }

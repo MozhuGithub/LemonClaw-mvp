@@ -32,7 +32,7 @@ export function ChatInput({ onSend, onAbort, disabled, isStreaming }: Props) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={disabled ? 'Gateway 未启动...' : '输入消息...'}
+        placeholder={isStreaming ? '等待回复...' : '输入消息...'}
         disabled={disabled}
         className="flex-1 bg-zinc-900"
       />

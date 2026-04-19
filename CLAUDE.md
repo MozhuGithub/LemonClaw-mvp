@@ -145,8 +145,8 @@ cd vendor/openclaw && pnpm install
 ## 核心模块（按 MVP 优先级）
 
 1. **Gateway 集成** ✅ — GatewayLauncher + Config Bridge + RPC Client（Step 3 完成）
-2. **基础聊天 UI** ✅ — Chat Store + 消息组件 + 流式渲染（Step 4 完成，Mock 模式）
-3. **LLM 接通** ⬜ — Config Bridge 按可用配置格式生成 openclaw.json，Chat Store 切真实 RPC（Step 5）
+2. **基础聊天 UI** ✅ — Chat Store + 消息组件 + 流式渲染（Step 4 完成）
+3. **LLM 接通** ✅ — Chat Store 切真实 RPC + API Key 自动播种 + Minimax 流式回复（Step 5 完成）
 4. **Settings 页** ⬜ — API Key 配置 → Secret Injector → auth-profiles.json（Step 6）
 5. **会话持久化** ⬜ — 历史加载、多轮上下文、重启恢复（Step 7）
 6. **Agent 管理** ⬜ — Agent 列表、切换（Step 8）

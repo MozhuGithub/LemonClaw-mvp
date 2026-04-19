@@ -185,7 +185,7 @@ class GatewayRpcClient extends EventEmitter {
 
 ---
 
-### Step 5: LLM 接通 ⬜
+### Step 5: LLM 接通 ✅（2026-04-19）
 
 **目标**：Gateway 通过 minimax-portal provider 调用 Minimax API，前端收到真实流式回复
 
@@ -193,17 +193,25 @@ class GatewayRpcClient extends EventEmitter {
 
 | 任务 | 关键文件 | 说明 |
 |------|---------|------|
-| Config Bridge 完善 | `src/main/gateway/config-bridge.ts` | `auth.profiles` + `models.providers`（嵌入 apiKey）+ `plugins.entries`（minimax-portal-auth），对照用户可用配置 |
-| Chat Store 切真实模式 | `src/renderer/src/stores/chat-store.ts` | 去掉 mock，用 hostApi.chatSend → 监听 onChatEvent（delta/final/error/aborted） |
+| API Key 自动播种 | `src/main/ipc-handlers.ts` | 启动时从 `auth-profiles.json` 读取已保存的 API Key，预填到 `providerKeys` |
+| Chat Store 切真实模式 | `src/renderer/src/stores/chat-store.ts` | 删除 MOCK_REPLIES 和 mockStreamReply，用 hostApi.chatSend + hostApi.onChatEvent（delta/final/error/aborted） |
 | RPC 事件转发 | `src/main/ipc-handlers.ts` | rpcClient.on('event') → BrowserWindow.send('chat:event') |
-| API Key 硬编码测试 | `src/main/ipc-handlers.ts` | 临时硬编码 Minimax API Key 验证通路，验证后改为 Settings 注入 |
+| 历史消息加载 | `src/renderer/src/stores/chat-store.ts` | loadHistory 调 hostApi.chatHistory，解析 content block 数组 |
 
 **验证标准：**
-- [ ] 发消息 → 收到 Minimax 模型真实回复
-- [ ] 流式显示（delta → final）
-- [ ] 错误状态正确展示（模型不可用等）
+- [x] 发消息 → 收到 Minimax 模型真实回复
+- [x] 流式显示（delta → final）
+- [x] 第二条消息多轮对话正常
+- [x] 停止按钮可中断回复
 
-**前置条件**：Minimax API Key、模型 `minimax-portal/MiniMax-M2.7-HighSpeed`
+**关键踩坑：**
+- Gateway 内部 spawn curl 导致 DEP0190 警告，Windows 上产生可见控制台窗口（OpenClaw 内部行为，不可完全消除）
+- prompt 过长时 Gateway 会发送 BOOTSTRAP.md 引导内容，属正常行为
+- RPC 连接时机：需等 stdout 输出 "embedded acpx runtime backend ready" 后才创建 RPC 连接
+
+**遗留问题：**
+- SettingsPage 默认值（openai/glm-5.1）与后端硬编码（minimax-portal/MiniMax-M2.7-HighSpeed）不一致，需 Step 6 修正
+- chat-store.ts 含大量调试日志，建议后续清理
 
 ---
 
